@@ -35,10 +35,12 @@ type AnalyzeResponse = {
   };
 };
 
-type LogEntry = {
+type StepEvent = {
   id: string;
-  text: string;
-  type: "info" | "success" | "warn";
+  time: string;
+  name: string;
+  emoji: string;
+  message: string;
 };
 
 type Toast = {
@@ -60,9 +62,8 @@ export default function HomePage() {
   const [isFocused, setIsFocused] = useState(false);
   const [pulseInput, setPulseInput] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [running, setRunning] = useState(false);
-  const [activity, setActivity] = useState<string[]>([]);
+  const [steps, setSteps] = useState<StepEvent[]>([]);
   const [productInfo, setProductInfo] = useState<ProductInfo>({
     status: "idle",
     title: null,
@@ -75,19 +76,14 @@ export default function HomePage() {
   const [ripple, setRipple] = useState<{ id: string; x: number; y: number } | null>(
     null
   );
-  const runIdRef = useRef(0);
+  const sourceRef = useRef<EventSource | null>(null);
   const prefersReducedMotion = useReducedMotion();
   const easeOut = [0.16, 1, 0.3, 1] as const;
   const easeInOut = [0.4, 0, 0.2, 1] as const;
+  const progress = Math.min(steps.length / totalSteps, 1);
+  const activeStepId = running ? steps[steps.length - 1]?.id : null;
 
   const fallbackFlags: RuleFlag[] = ["analysis_failed"];
-
-  const pushLog = (text: string, type: "info" | "success" | "warn" = "info") => {
-    setLogs((prev) => [
-      ...prev,
-      { id: Math.random().toString(36).slice(2), text, type },
-    ]);
-  };
 
   const pushToast = (message: string) => {
     const id = Math.random().toString(36).slice(2);
@@ -97,17 +93,14 @@ export default function HomePage() {
     }, 2600);
   };
 
-  function pushActivity(msg: string) {
-    setActivity((prev) => [...prev, msg]);
-  }
+  const totalSteps = 9;
 
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
     setResult(null);
-    setLogs([]);
     setRunning(true);
-    setActivity([]);
+    setSteps([]);
     setProductInfo({
       status: "idle",
       title: null,
@@ -117,27 +110,13 @@ export default function HomePage() {
     setCardExpanded(true);
     pushToast("🚀 Analysis started");
 
-    const runId = runIdRef.current + 1;
-    runIdRef.current = runId;
-    const pushLogSafe = (
-      text: string,
-      type: "info" | "success" | "warn" = "info"
-    ) => {
-      if (runIdRef.current !== runId) return;
-      pushLog(text, type);
-    };
-
     try {
-      pushActivity("Validating URL… 🔍");
       try {
         new URL(url);
       } catch {
-        pushActivity("Analysis failed – see error details ❌");
         throw new Error("Invalid URL");
       }
 
-      pushActivity("Contacting Mino agent… 🤖");
-      pushActivity("Fetching application page content… 🌐");
       const pageRes = await fetch("/api/fetch-page", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -163,37 +142,66 @@ export default function HomePage() {
         setProductInfo((prev) => ({ ...prev, status: "error" }));
       }
 
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url }),
+      if (sourceRef.current) {
+        sourceRef.current.close();
+      }
+
+      const source = new EventSource(
+        `/api/analyze-stream?url=${encodeURIComponent(url)}&t=${Date.now()}`
+      );
+      sourceRef.current = source;
+
+      source.onmessage = (event) => {
+        const step = JSON.parse(event.data) as StepEvent;
+        setSteps((prev) => [...prev, step]);
+        pushToast(`${step.emoji} ${step.message}...`);
+      };
+
+      source.addEventListener("done", (event) => {
+        const data = JSON.parse((event as MessageEvent).data) as AnalyzeResponse;
+        setResult(data);
+        setRunning(false);
+        source.close();
+        sourceRef.current = null;
+        pushToast("🎉 Trust report generated");
       });
 
-      const data = (await res.json()) as AnalyzeResponse;
-      pushActivity("Extracting eligibility rules… 📄");
-      pushActivity("Extracting document text… 🧾");
-      pushActivity("Running document quality checks… 🧪");
-      pushActivity("Running rejection analysis engine… ⚙️");
-      pushActivity("Preparing structured results… 📊");
-      if (!res.ok) {
-        throw new Error("Request failed.");
-      }
-      setResult(data);
-      pushLogSafe("⚖️ Computing trust verdict…", "success");
-      pushLogSafe("📊 Preparing report…", "success");
-      pushLogSafe("✅ Trust report ready.", "success");
-      pushToast("🎉 Trust report generated");
+      source.onerror = () => {
+        source.close();
+        sourceRef.current = null;
+        setRunning(false);
+        setSteps((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(36).slice(2),
+            time: new Date().toISOString(),
+            name: "analysis_failed",
+            emoji: "❌",
+            message: "Analysis failed – see error details",
+          },
+        ]);
+      };
     } catch {
+      sourceRef.current?.close();
+      sourceRef.current = null;
       setResult({
         verdict: "unclear",
         flags: fallbackFlags,
         explanations: [],
       });
-      pushActivity("Analysis failed – see error details ❌");
-      pushLogSafe("⚠️ Unable to complete analysis.", "warn");
+      setSteps((prev) => [
+        ...prev,
+        {
+          id: Math.random().toString(36).slice(2),
+          time: new Date().toISOString(),
+          name: "analysis_failed",
+          emoji: "❌",
+          message: "Analysis failed – see error details",
+        },
+      ]);
+      setRunning(false);
     } finally {
       setLoading(false);
-      setRunning(false);
     }
   };
 
@@ -223,6 +231,12 @@ export default function HomePage() {
     }, 120);
     return () => clearInterval(timer);
   }, [loading]);
+
+  useEffect(() => {
+    return () => {
+      sourceRef.current?.close();
+    };
+  }, []);
 
   const verdictConfig = useMemo(() => {
     const verdict = result?.verdict ?? "unclear";
@@ -561,23 +575,66 @@ export default function HomePage() {
                   {running ? "Live" : "Idle"}
                 </span>
               </div>
-              <div className="mt-3 space-y-2 text-xs text-slate-200">
+              <div className="mt-3">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                  <motion.div
+                    className="h-full rounded-full bg-gradient-to-r from-sky-400 via-indigo-400 to-emerald-400"
+                    animate={{ width: `${progress * 100}%` }}
+                    transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.25 }}
+                  />
+                </div>
+              </div>
+              <div className="mt-4 space-y-3 text-xs text-slate-200">
                 <AnimatePresence initial={false}>
-                  {activity.length ? (
-                    activity.map((item, index) => (
+                  {steps.length ? (
+                    steps.map((step, index) => (
                       <motion.div
-                        key={`${item}-${index}`}
+                        key={step.id}
                         initial={{ opacity: 0, x: -8 }}
                         animate={{ opacity: 1, x: 0 }}
                         exit={{ opacity: 0, x: -8 }}
                         transition={
                           prefersReducedMotion
                             ? { duration: 0 }
-                            : { duration: 0.25, delay: index * 0.05 }
+                            : { duration: 0.25, delay: index * 0.03 }
                         }
-                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono"
+                        className={`rounded-xl border border-white/10 bg-white/5 px-3 py-2 ${
+                          step.id === activeStepId ? "shadow-[0_0_20px_rgba(59,130,246,0.25)]" : ""
+                        }`}
                       >
-                        {item}
+                        <div className="flex items-start gap-3">
+                          <div className="text-base">{step.emoji}</div>
+                          <div className="flex-1">
+                            <p className="text-[11px] uppercase text-slate-400">
+                              {step.name.replace(/_/g, " ")}
+                            </p>
+                            <p className="text-sm text-slate-200">
+                              {step.message}
+                            </p>
+                            <p className="text-[11px] text-slate-500">
+                              {new Date(step.time).toLocaleTimeString()}
+                            </p>
+                          </div>
+                          {running && step.id === activeStepId ? (
+                            <div className="flex items-center gap-1 text-slate-400">
+                              <motion.span
+                                animate={prefersReducedMotion ? { opacity: 1 } : { opacity: [0.2, 1, 0.2] }}
+                                transition={prefersReducedMotion ? { duration: 0 } : { duration: 1, repeat: Infinity }}
+                                className="h-1.5 w-1.5 rounded-full bg-slate-400"
+                              />
+                              <motion.span
+                                animate={prefersReducedMotion ? { opacity: 1 } : { opacity: [0.2, 1, 0.2] }}
+                                transition={prefersReducedMotion ? { duration: 0 } : { duration: 1, repeat: Infinity, delay: 0.2 }}
+                                className="h-1.5 w-1.5 rounded-full bg-slate-400"
+                              />
+                              <motion.span
+                                animate={prefersReducedMotion ? { opacity: 1 } : { opacity: [0.2, 1, 0.2] }}
+                                transition={prefersReducedMotion ? { duration: 0 } : { duration: 1, repeat: Infinity, delay: 0.4 }}
+                                className="h-1.5 w-1.5 rounded-full bg-slate-400"
+                              />
+                            </div>
+                          ) : null}
+                        </div>
                       </motion.div>
                     ))
                   ) : (
@@ -764,7 +821,7 @@ export default function HomePage() {
         </div>
       </motion.div>
 
-      <div className="pointer-events-none fixed right-5 top-5 z-50 space-y-2">
+      <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 space-y-2">
         <AnimatePresence>
           {toasts.map((toast) => (
             <motion.div
