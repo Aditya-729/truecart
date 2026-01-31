@@ -35,6 +35,8 @@ export type StreamStepEvent = {
 
 type AnalyzeOptions = {
   onStep?: (step: StreamStepEvent) => void;
+  onActivity?: (message: string) => void;
+  onLongStep?: (title: string) => void;
   emitValidationStep?: boolean;
 };
 
@@ -78,6 +80,23 @@ export async function analyzeProduct(
   const sendStep = (name: string, emoji: string, message: string) => {
     if (!options.onStep) return;
     options.onStep(createStepEvent(name, emoji, message));
+  };
+  const sendActivity = (message: string) => {
+    options.onActivity?.(message);
+  };
+  const withHeartbeat = async <T>(title: string, task: () => Promise<T> | T) => {
+    options.onLongStep?.(title);
+    let timer: ReturnType<typeof setInterval> | null = null;
+    if (options.onActivity) {
+      timer = setInterval(() => {
+        options.onActivity?.(`Still working on: ${title}…`);
+      }, 2000);
+    }
+    try {
+      return await task();
+    } finally {
+      if (timer) clearInterval(timer);
+    }
   };
 
   const respond = (
@@ -124,6 +143,7 @@ export async function analyzeProduct(
 
   if (options.emitValidationStep !== false) {
     sendStep("validate_input", "🔍", "Validating URL and user inputs");
+    sendActivity("Validating URL and user inputs");
   }
   if (!url) {
     steps.push({
@@ -158,6 +178,7 @@ export async function analyzeProduct(
     steps.push({ name: "Load test case", status: "done" });
 
     sendStep("extract_rules", "📄", "Extracting eligibility and exclusion rules");
+    sendActivity("Extracting eligibility and exclusion rules");
     const claims = await trackStep("Extract claims", () =>
       extractClaims(testCase.productText)
     );
@@ -166,9 +187,13 @@ export async function analyzeProduct(
     );
 
     sendStep("parse_documents", "🧾", "Parsing uploaded documents and OCR text");
+    sendActivity("Parsing uploaded documents and OCR text");
     sendStep("analyze_rules", "⚙️", "Matching rules with user profile");
-    const rules = await trackStep("Detect contradictions", () =>
-      detectContradictions(claims, policy)
+    sendActivity("Matching rules with user profile");
+    const rules = await withHeartbeat("Evaluating eligibility rules", () =>
+      trackStep("Detect contradictions", () =>
+        detectContradictions(claims, policy)
+      )
     );
     sendStep(
       "risk_update",
@@ -177,10 +202,16 @@ export async function analyzeProduct(
         rules.flags.length === 1 ? "" : "s"
       }`
     );
+    sendActivity(
+      `Risk update: ${rules.verdict.toUpperCase()} • ${rules.flags.length} flag${
+        rules.flags.length === 1 ? "" : "s"
+      }`
+    );
     const explanations = await trackStep("Explain flags", () =>
       explainFlags(rules.flags)
     );
     sendStep("finalize", "📊", "Compiling rejection reasons and recommendations");
+    sendActivity("Compiling rejection reasons and recommendations");
 
     const insight =
       rules.flags.length === 0
@@ -194,6 +225,10 @@ export async function analyzeProduct(
     sendStep(
       "insight_update",
       "💡",
+      insight?.message ??
+        "Insights limited due to detected policy conflicts."
+    );
+    sendActivity(
       insight?.message ??
         "Insights limited due to detected policy conflicts."
     );
@@ -219,14 +254,28 @@ export async function analyzeProduct(
   }
 
   sendStep("call_mino", "🤖", "Sending pages to Mino agent");
-  const mino = await trackStep("Fetch Mino data", () => runMinoAgent(url));
-
-  sendStep("collect_pages", "📚", "Collecting eligibility and exclusion pages");
-  const policyText = await trackStep("Compile policy text", () =>
-    mino.policyPages.map((page) => page.text).join("\n")
+  sendActivity("Sending pages to Mino agent");
+  const mino = await withHeartbeat("Calling policy analysis engine", () =>
+    trackStep("Fetch Mino data", () => runMinoAgent(url))
   );
 
+  sendStep("collect_pages", "📚", "Collecting eligibility and exclusion pages");
+  sendActivity("Collecting eligibility and exclusion pages");
+  const policyText = await trackStep("Compile policy text", () => {
+    const total = mino.policyPages.length;
+    if (total > 0) {
+      let combined = "";
+      mino.policyPages.forEach((page, index) => {
+        sendActivity(`Processing item ${index + 1} of ${total}`);
+        combined += `${page.text}\n`;
+      });
+      return combined;
+    }
+    return "";
+  });
+
   sendStep("extract_rules", "📄", "Extracting eligibility and exclusion rules");
+  sendActivity("Extracting eligibility and exclusion rules");
   const claims = await trackStep("Extract claims", () =>
     extractClaims(mino.productText)
   );
@@ -235,9 +284,13 @@ export async function analyzeProduct(
   );
 
   sendStep("parse_documents", "🧾", "Parsing uploaded documents and OCR text");
+  sendActivity("Parsing uploaded documents and OCR text");
   sendStep("analyze_rules", "⚙️", "Matching rules with user profile");
-  const rules = await trackStep("Detect contradictions", () =>
-    detectContradictions(claims, policy)
+  sendActivity("Matching rules with user profile");
+  const rules = await withHeartbeat("Evaluating eligibility rules", () =>
+    trackStep("Detect contradictions", () =>
+      detectContradictions(claims, policy)
+    )
   );
   sendStep(
     "risk_update",
@@ -246,10 +299,16 @@ export async function analyzeProduct(
       rules.flags.length === 1 ? "" : "s"
     }`
   );
+  sendActivity(
+    `Risk update: ${rules.verdict.toUpperCase()} • ${rules.flags.length} flag${
+      rules.flags.length === 1 ? "" : "s"
+    }`
+  );
   const explanations = await trackStep("Explain flags", () =>
     explainFlags(rules.flags)
   );
   sendStep("finalize", "📊", "Compiling rejection reasons and recommendations");
+  sendActivity("Compiling rejection reasons and recommendations");
 
   const insight =
     rules.flags.length === 0 || !policyText.trim()
@@ -258,6 +317,10 @@ export async function analyzeProduct(
   sendStep(
     "insight_update",
     "💡",
+    insight?.message ??
+      "Insights limited due to detected policy conflicts."
+  );
+  sendActivity(
     insight?.message ??
       "Insights limited due to detected policy conflicts."
   );

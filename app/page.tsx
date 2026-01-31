@@ -35,17 +35,17 @@ type AnalyzeResponse = {
   };
 };
 
-type StepEvent = {
+type ActivityEvent = {
   id: string;
-  time: string;
-  name: string;
-  emoji: string;
   message: string;
+  time: string;
+  kind?: "heartbeat" | "normal";
 };
 
-type Toast = {
+type LongStepToast = {
   id: string;
-  message: string;
+  title: string;
+  icon: string;
 };
 
 type ProductInfo = {
@@ -63,7 +63,7 @@ export default function HomePage() {
   const [pulseInput, setPulseInput] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [running, setRunning] = useState(false);
-  const [steps, setSteps] = useState<StepEvent[]>([]);
+  const [activities, setActivities] = useState<ActivityEvent[]>([]);
   const [liveRisk, setLiveRisk] = useState<string | null>(null);
   const [liveInsight, setLiveInsight] = useState<string | null>(null);
   const [productInfo, setProductInfo] = useState<ProductInfo>({
@@ -72,25 +72,39 @@ export default function HomePage() {
     price: null,
     description: null,
   });
-  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [longStepToasts, setLongStepToasts] = useState<LongStepToast[]>([]);
+  const [showIdleHint, setShowIdleHint] = useState(false);
   const [cardExpanded, setCardExpanded] = useState(false);
   const [buttonHover, setButtonHover] = useState(false);
   const sourceRef = useRef<EventSource | null>(null);
+  const streamActiveRef = useRef(false);
+  const lastActivityRef = useRef(Date.now());
   const prefersReducedMotion = useReducedMotion();
   const totalSteps = 11;
   const easeOut = [0.16, 1, 0.3, 1] as const;
   const easeInOut = [0.4, 0, 0.2, 1] as const;
-  const progress = result ? 1 : Math.min(steps.length / totalSteps, 1);
-  const activeStepId = running ? steps[steps.length - 1]?.id : null;
+  const progressCount = activities.filter((item) => item.kind !== "heartbeat").length;
+  const progress = result ? 1 : Math.min(progressCount / totalSteps, 1);
+  const activeActivityId = running ? activities[activities.length - 1]?.id : null;
 
   const fallbackFlags: RuleFlag[] = ["analysis_failed"];
 
-  const pushToast = (message: string) => {
+  const getLongStepIcon = (title: string) => {
+    const lower = title.toLowerCase();
+    if (lower.includes("document")) return "📄";
+    if (lower.includes("product page")) return "🌐";
+    if (lower.includes("policy")) return "🤖";
+    if (lower.includes("eligibility") || lower.includes("rules")) return "🧠";
+    return "⏳";
+  };
+
+  const pushLongStepToast = (title: string) => {
     const id = Math.random().toString(36).slice(2);
-    setToasts((prev) => [...prev, { id, message }]);
+    const icon = getLongStepIcon(title);
+    setLongStepToasts((prev) => [...prev, { id, title, icon }]);
     setTimeout(() => {
-      setToasts((prev) => prev.filter((toast) => toast.id !== id));
-    }, 2600);
+      setLongStepToasts((prev) => prev.filter((toast) => toast.id !== id));
+    }, 3000);
   };
 
   const onSubmit = async (event: React.FormEvent) => {
@@ -98,9 +112,10 @@ export default function HomePage() {
     setLoading(true);
     setResult(null);
     setRunning(true);
-    setSteps([]);
+    setActivities([]);
     setLiveRisk(null);
     setLiveInsight(null);
+    setShowIdleHint(false);
     setProductInfo({
       status: "idle",
       title: null,
@@ -108,7 +123,8 @@ export default function HomePage() {
       description: null,
     });
     setCardExpanded(true);
-    pushToast("🚀 Analysis started");
+    setLongStepToasts([]);
+    lastActivityRef.current = Date.now();
 
     try {
       try {
@@ -150,18 +166,38 @@ export default function HomePage() {
         `/api/analyze-stream?url=${encodeURIComponent(url)}&t=${Date.now()}`
       );
       sourceRef.current = source;
+      streamActiveRef.current = true;
 
-      source.onmessage = (event) => {
-        const step = JSON.parse(event.data) as StepEvent;
-        setSteps((prev) => [...prev, step]);
-        if (step.name === "risk_update") {
-          setLiveRisk(step.message);
+      source.addEventListener("activity", (event) => {
+        const data = JSON.parse((event as MessageEvent).data) as { message: string };
+        const isHeartbeat = data.message.startsWith("Still working on:");
+        setActivities((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(36).slice(2),
+            message: data.message,
+            time: new Date().toISOString(),
+            kind: isHeartbeat ? "heartbeat" : "normal",
+          },
+        ]);
+        lastActivityRef.current = Date.now();
+        setShowIdleHint(false);
+        if (data.message.startsWith("Risk update:")) {
+          setLiveRisk(data.message);
         }
-        if (step.name === "insight_update") {
-          setLiveInsight(step.message);
+        if (
+          data.message.startsWith("Insight") ||
+          data.message.startsWith("Insights") ||
+          data.message.includes("hidden policy")
+        ) {
+          setLiveInsight(data.message);
         }
-        pushToast(`${step.emoji} ${step.message}...`);
-      };
+      });
+
+      source.addEventListener("long-step", (event) => {
+        const data = JSON.parse((event as MessageEvent).data) as { title: string };
+        pushLongStepToast(data.title);
+      });
 
       source.addEventListener("done", (event) => {
         const data = JSON.parse((event as MessageEvent).data) as AnalyzeResponse;
@@ -169,40 +205,42 @@ export default function HomePage() {
         setRunning(false);
         source.close();
         sourceRef.current = null;
-        pushToast("🎉 Trust report generated");
+        streamActiveRef.current = false;
+        setShowIdleHint(false);
       });
 
       source.onerror = () => {
         source.close();
         sourceRef.current = null;
         setRunning(false);
-        setSteps((prev) => [
+        streamActiveRef.current = false;
+        setShowIdleHint(false);
+        setActivities((prev) => [
           ...prev,
           {
             id: Math.random().toString(36).slice(2),
-            time: new Date().toISOString(),
-            name: "analysis_failed",
-            emoji: "❌",
             message: "Analysis failed – see error details",
+            time: new Date().toISOString(),
+            kind: "normal",
           },
         ]);
       };
     } catch {
       sourceRef.current?.close();
       sourceRef.current = null;
+      streamActiveRef.current = false;
       setResult({
         verdict: "unclear",
         flags: fallbackFlags,
         explanations: [],
       });
-      setSteps((prev) => [
+      setActivities((prev) => [
         ...prev,
         {
           id: Math.random().toString(36).slice(2),
-          time: new Date().toISOString(),
-          name: "analysis_failed",
-          emoji: "❌",
           message: "Analysis failed – see error details",
+          time: new Date().toISOString(),
+          kind: "normal",
         },
       ]);
       setRunning(false);
@@ -241,7 +279,20 @@ export default function HomePage() {
   useEffect(() => {
     return () => {
       sourceRef.current?.close();
+      streamActiveRef.current = false;
     };
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!streamActiveRef.current) {
+        setShowIdleHint(false);
+        return;
+      }
+      const idleFor = Date.now() - lastActivityRef.current;
+      setShowIdleHint(idleFor > 3000);
+    }, 1000);
+    return () => clearInterval(timer);
   }, []);
 
   const verdictConfig = useMemo(() => {
@@ -584,55 +635,33 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="mt-4 space-y-3 text-xs text-slate-200">
-                  <AnimatePresence initial={false}>
-                    {steps.length ? (
-                      steps.map((step, index) => (
+                <AnimatePresence initial={false}>
+                    {activities.length ? (
+                      activities.map((item, index) => (
                         <motion.div
-                          key={step.id}
-                          initial={{ opacity: 0, x: -8 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          exit={{ opacity: 0, x: -8 }}
+                          key={item.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: 8 }}
                           transition={
                             prefersReducedMotion
                               ? { duration: 0 }
-                              : { duration: 0.25, delay: index * 0.03 }
+                              : { duration: 0.25, delay: index * 0.02 }
                           }
                           className={`rounded-xl border border-white/10 bg-white/5 px-3 py-2 ${
-                            step.id === activeStepId ? "shadow-[0_0_20px_rgba(59,130,246,0.25)]" : ""
+                            item.id === activeActivityId ? "shadow-[0_0_20px_rgba(59,130,246,0.2)]" : ""
                           }`}
                         >
                           <div className="flex items-start gap-3">
-                            <div className="text-base">{step.emoji}</div>
+                            <div className="mt-1 h-2 w-2 rounded-full bg-slate-400/70" />
                             <div className="flex-1">
-                              <p className="text-[11px] uppercase text-slate-400">
-                                {step.name.replace(/_/g, " ")}
-                              </p>
                               <p className="text-sm text-slate-200">
-                                {step.message}
+                                {item.message}
                               </p>
                               <p className="text-[11px] text-slate-500">
-                                {new Date(step.time).toLocaleTimeString()}
+                                {new Date(item.time).toLocaleTimeString()}
                               </p>
                             </div>
-                            {running && step.id === activeStepId ? (
-                              <div className="flex items-center gap-1 text-slate-400">
-                                <motion.span
-                                  animate={prefersReducedMotion ? { opacity: 1 } : { opacity: [0.2, 1, 0.2] }}
-                                  transition={prefersReducedMotion ? { duration: 0 } : { duration: 1, repeat: Infinity }}
-                                  className="h-1.5 w-1.5 rounded-full bg-slate-400"
-                                />
-                                <motion.span
-                                  animate={prefersReducedMotion ? { opacity: 1 } : { opacity: [0.2, 1, 0.2] }}
-                                  transition={prefersReducedMotion ? { duration: 0 } : { duration: 1, repeat: Infinity, delay: 0.2 }}
-                                  className="h-1.5 w-1.5 rounded-full bg-slate-400"
-                                />
-                                <motion.span
-                                  animate={prefersReducedMotion ? { opacity: 1 } : { opacity: [0.2, 1, 0.2] }}
-                                  transition={prefersReducedMotion ? { duration: 0 } : { duration: 1, repeat: Infinity, delay: 0.4 }}
-                                  className="h-1.5 w-1.5 rounded-full bg-slate-400"
-                                />
-                              </div>
-                            ) : null}
                           </div>
                         </motion.div>
                       ))
@@ -648,6 +677,17 @@ export default function HomePage() {
                       </motion.div>
                     )}
                   </AnimatePresence>
+                  {showIdleHint && running ? (
+                    <motion.div
+                      key="idle-hint"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-400"
+                    >
+                      Still working…
+                    </motion.div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -862,17 +902,20 @@ export default function HomePage() {
         </motion.div>
       </div>
 
-      <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 -translate-x-1/2 space-y-2">
+      <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 -translate-x-1/2 space-y-2">
         <AnimatePresence>
-          {toasts.map((toast) => (
+          {longStepToasts.map((toast) => (
             <motion.div
               key={toast.id}
-              initial={{ opacity: 0, y: -8 }}
+              initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              className="rounded-xl border border-white/10 bg-black/70 px-4 py-2 text-xs text-slate-200 shadow-lg backdrop-blur"
+              exit={{ opacity: 0, y: 10 }}
+              className="rounded-xl border border-white/10 bg-black/70 px-4 py-3 text-xs text-slate-200 shadow-lg backdrop-blur"
             >
-              {toast.message}
+              <div className="flex items-center gap-2">
+                <span className="text-base">{toast.icon}</span>
+                <span>{toast.title}</span>
+              </div>
             </motion.div>
           ))}
         </AnimatePresence>

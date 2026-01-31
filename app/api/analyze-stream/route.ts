@@ -1,87 +1,88 @@
 import { NextResponse } from "next/server";
 
 import { analyzeProduct } from "@/lib/analyzePipeline";
-import type { StreamStepEvent } from "@/lib/analyzePipeline";
 import { fetchPageHtml } from "@/lib/server/fetchPage";
 import { extractProductInfoServer } from "@/lib/server/extractProductInfo";
 
 const encoder = new TextEncoder();
 
-type SendStep = (name: string, emoji: string, message: string) => void;
+type SendActivity = (message: string) => void;
+type SendLongStep = (title: string) => void;
 
 const sendEvent = (
   controller: ReadableStreamDefaultController,
-  payload: string,
-  event?: string
+  event: string,
+  payload: unknown
 ) => {
-  const prefix = event ? `event: ${event}\n` : "";
-  controller.enqueue(encoder.encode(`${prefix}data: ${payload}\n\n`));
+  controller.enqueue(
+    encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`)
+  );
 };
-
-const createStep = (name: string, emoji: string, message: string): StreamStepEvent => ({
-  id: Math.random().toString(36).slice(2),
-  time: new Date().toISOString(),
-  name,
-  emoji,
-  message,
-});
 
 async function streamAnalysis(url: string) {
   return new ReadableStream({
     async start(controller) {
-      const sendStep: SendStep = (name, emoji, message) => {
-        const step = createStep(name, emoji, message);
-        sendEvent(controller, JSON.stringify(step));
+      const sendActivity: SendActivity = (message) =>
+        sendEvent(controller, "activity", { message });
+      const sendLongStep: SendLongStep = (title) =>
+        sendEvent(controller, "long-step", { title });
+      const withHeartbeat = async <T>(title: string, task: () => Promise<T> | T) => {
+        sendLongStep(title);
+        const timer = setInterval(() => {
+          sendActivity(`Still working on: ${title}…`);
+        }, 2000);
+        try {
+          return await task();
+        } finally {
+          clearInterval(timer);
+        }
       };
 
       try {
         if (!url) {
-          sendStep("validate_input", "🔍", "Validating URL and user inputs");
+          sendActivity("Validating URL and user inputs");
           const result = await analyzeProduct("");
-          sendEvent(controller, JSON.stringify(result), "done");
+          sendEvent(controller, "done", result);
           controller.close();
           return;
         }
         try {
           new URL(url);
         } catch {
-          sendStep("validate_input", "🔍", "Validating URL and user inputs");
+          sendActivity("Validating URL and user inputs");
           const result = await analyzeProduct("");
-          sendEvent(controller, JSON.stringify(result), "done");
+          sendEvent(controller, "done", result);
           controller.close();
           return;
         }
 
-        sendStep("validate_input", "🔍", "Validating URL and user inputs");
-        sendStep("fetch_product_page", "🌐", "Fetching product page HTML");
-        const pageResult = await fetchPageHtml(url);
+        sendActivity("Validating URL and user inputs");
+        sendActivity("Fetching product page HTML");
+        const pageResult = await withHeartbeat("Fetching product page", () =>
+          fetchPageHtml(url)
+        );
         if (!pageResult.blocked && pageResult.html) {
-          sendStep(
-            "extract_product_info",
-            "🧠",
-            "Extracting product title, price and description"
-          );
+          sendActivity("Extracting product title, price and description");
           extractProductInfoServer(pageResult.html);
         } else {
-          sendStep(
-            "extract_product_info",
-            "🧠",
-            "Extracting product title, price and description"
-          );
+          sendActivity("Extracting product title, price and description");
         }
 
         const result = await analyzeProduct(url, {
           emitValidationStep: false,
-          onStep: (step) => {
-            sendEvent(controller, JSON.stringify(step));
+          onActivity: (message) => {
+            sendActivity(message);
+          },
+          onLongStep: (title) => {
+            sendLongStep(title);
           },
         });
 
-        sendEvent(controller, JSON.stringify(result), "done");
+        sendEvent(controller, "done", result);
         controller.close();
       } catch {
         const fallback = await analyzeProduct("");
-        sendEvent(controller, JSON.stringify(fallback), "done");
+        sendEvent(controller, "done", fallback);
         controller.close();
       }
     },
