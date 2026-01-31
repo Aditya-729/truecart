@@ -498,7 +498,8 @@ export default function HomePage() {
                       : "Showing live site preview (if allowed)."}
                   </div>
                 </div>
-              ) : !loading && result?.previewImage ? (
+              ) : null}
+              {!loading && result?.previewImage ? (
                 <div className="mt-4 overflow-hidden rounded-2xl border border-white/10">
                   <img
                     src={result.previewImage}
@@ -509,59 +510,56 @@ export default function HomePage() {
                     Captured preview from agent.
                   </div>
                 </div>
-              ) : (
-                <>
-                  <div className="mt-4 space-y-3 text-sm">
-                    {activitySteps.map((step, index) => (
-                      <motion.div
-                        key={`${step.name}-${index}`}
-                        initial={{ opacity: 0, y: 4 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: index * 0.05 }}
-                        className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
-                      >
-                        <motion.span
-                          animate={
-                            loading
-                              ? { opacity: [0.4, 1, 0.4] }
-                              : { opacity: 1 }
-                          }
-                          transition={{ duration: 1.2, repeat: Infinity }}
-                          className={`mt-1 h-2 w-2 rounded-full ${
-                            step.status === "failed"
-                              ? "bg-rose-400"
-                              : "bg-emerald-400"
-                          }`}
-                        />
-                        <div className="flex-1">
-                          <p className="text-slate-200">{step.name}</p>
-                          {step.detail ? (
-                            <p className="text-xs text-slate-500">
-                              {step.detail}
-                            </p>
-                          ) : null}
-                        </div>
-                        {step.durationMs ? (
-                          <span className="text-xs text-slate-500">
-                            {(step.durationMs / 1000).toFixed(2)}s
-                          </span>
-                        ) : null}
-                      </motion.div>
-                    ))}
-                  </div>
-                  <div className="mt-4 text-xs text-slate-500">
-                    {loading
-                      ? "Streaming live agent steps to keep you informed."
-                      : "Agent steps recorded for transparency."}
-                  </div>
-                </>
-              )}
+              ) : null}
               {loading && url && iframeStatus === "failed" ? (
                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-500">
                   This site blocks embedded previews. Showing activity panel
                   instead.
                 </div>
               ) : null}
+              <div className="mt-4 space-y-3 text-sm">
+                {activitySteps.map((step, index) => (
+                  <motion.div
+                    key={`${step.name}-${index}`}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                    className="flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2"
+                  >
+                    <motion.span
+                      animate={
+                        loading
+                          ? { opacity: [0.4, 1, 0.4] }
+                          : { opacity: 1 }
+                      }
+                      transition={{ duration: 1.2, repeat: Infinity }}
+                      className={`mt-1 h-2 w-2 rounded-full ${
+                        step.status === "failed"
+                          ? "bg-rose-400"
+                          : "bg-emerald-400"
+                      }`}
+                    />
+                    <div className="flex-1">
+                      <p className="text-slate-200">{step.name}</p>
+                      {step.detail ? (
+                        <p className="text-xs text-slate-500">
+                          {step.detail}
+                        </p>
+                      ) : null}
+                    </div>
+                    {step.durationMs ? (
+                      <span className="text-xs text-slate-500">
+                        {(step.durationMs / 1000).toFixed(2)}s
+                      </span>
+                    ) : null}
+                  </motion.div>
+                ))}
+              </div>
+              <div className="mt-4 text-xs text-slate-500">
+                {loading
+                  ? "Streaming live agent steps to keep you informed."
+                  : "Agent steps recorded for transparency."}
+              </div>
             </div>
           </section>
         </div>
