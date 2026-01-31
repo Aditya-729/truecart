@@ -2,6 +2,7 @@
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 
 import type { RuleFlag } from "@/lib/rules";
 import { extractProductInfoFromHTML } from "@/lib/client/extractProductInfo";
@@ -76,6 +77,7 @@ export default function HomePage() {
   const [showIdleHint, setShowIdleHint] = useState(false);
   const [cardExpanded, setCardExpanded] = useState(false);
   const [buttonHover, setButtonHover] = useState(false);
+  const [glitchOffset, setGlitchOffset] = useState({ x: 0, y: 0 });
   const sourceRef = useRef<EventSource | null>(null);
   const streamActiveRef = useRef(false);
   const lastActivityRef = useRef(Date.now());
@@ -105,6 +107,15 @@ export default function HomePage() {
     setTimeout(() => {
       setLongStepToasts((prev) => prev.filter((toast) => toast.id !== id));
     }, 3000);
+  };
+
+  const handleCopy = async (text: string) => {
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Ignore clipboard errors silently.
+    }
   };
 
   const onSubmit = async (event: React.FormEvent) => {
@@ -403,10 +414,45 @@ export default function HomePage() {
     };
   }, [easeInOut, easeOut, prefersReducedMotion, result?.verdict]);
 
-  const heroWords = useMemo(
-    () => "Instant trust signal for any product link".split(" "),
+  const heroTitle = "TrueCart";
+  const heroTitleLetters = useMemo(() => heroTitle.split(""), [heroTitle]);
+  const heroSubtitle = "Instant trust signal for any product link.";
+  const trueCartSteps = useMemo(
+    () => [
+      "Analyzing product details…",
+      "Checking pricing and discounts…",
+      "Comparing similar products…",
+      "Generating personalized recommendations…",
+      "Preparing final insights…",
+    ],
     []
   );
+
+  const titleWordVariants = {
+    hidden: (index: number) => ({
+      opacity: 0,
+      x: index % 2 === 0 ? -12 : 12,
+      rotate: index % 2 === 0 ? -2 : 2,
+      filter: "blur(6px)",
+    }),
+    visible: (index: number) => ({
+      opacity: 1,
+      x: 0,
+      rotate: 0,
+      filter: "blur(0px)",
+      transition: prefersReducedMotion
+        ? { duration: 0 }
+        : { duration: 0.35, delay: index * 0.06, ease: easeOut },
+    }),
+  };
+
+  useEffect(() => {
+    if (prefersReducedMotion) return;
+    setGlitchOffset({
+      x: Math.random() * 6 - 3,
+      y: Math.random() * 6 - 3,
+    });
+  }, [prefersReducedMotion]);
 
   return (
     <main className="relative min-h-screen w-full bg-[#0b0b0c] px-6 py-12 text-slate-100">
@@ -476,26 +522,53 @@ export default function HomePage() {
                 Trust signal engine
               </p>
               <h1 className="mt-4 text-4xl font-semibold uppercase leading-tight tracking-[0.08em] text-white sm:text-5xl lg:text-6xl">
-                {heroWords.map((word, index) => (
-                  <motion.span
-                    key={word}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={
-                      prefersReducedMotion
-                        ? { duration: 0 }
-                        : { duration: 0.4, delay: 0.05 * index }
-                    }
-                    className="mr-2 inline-block"
-                  >
-                    {word}
-                  </motion.span>
-                ))}
+                <span
+                  className={`glitch-title inline-flex flex-wrap gap-1 ${
+                    prefersReducedMotion ? "" : "glitch-active"
+                  }`}
+                  data-text={heroTitle}
+                  style={
+                    {
+                      "--glitch-x": `${glitchOffset.x}px`,
+                      "--glitch-y": `${glitchOffset.y}px`,
+                    } as CSSProperties
+                  }
+                >
+                  {heroTitleLetters.map((letter, index) => (
+                    <motion.span
+                      key={`${letter}-${index}`}
+                      initial={
+                        prefersReducedMotion ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 26, scale: 0.94 }
+                      }
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={
+                        prefersReducedMotion
+                          ? { duration: 0 }
+                          : { delay: index * 0.05, type: "spring", stiffness: 260, damping: 18 }
+                      }
+                      className="inline-block will-change-transform"
+                    >
+                      {letter}
+                    </motion.span>
+                  ))}
+                </span>
               </h1>
               <div className="mt-4 h-px w-32 bg-gradient-to-r from-white/50 via-white/10 to-transparent" />
-              <p className="mt-4 max-w-lg text-sm text-slate-400">
-                Paste a product URL to stream real-time analysis updates, risk snapshots,
-                and a final verdict — no hidden automation.
+              <motion.p
+                initial={
+                  prefersReducedMotion
+                    ? { opacity: 1, y: 0, letterSpacing: "0.08em", filter: "blur(0px)" }
+                    : { opacity: 0, y: 10, letterSpacing: "0.3em", filter: "blur(8px)" }
+                }
+                animate={{ opacity: 1, y: 0, letterSpacing: "0.08em", filter: "blur(0px)" }}
+                transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.8, ease: easeOut }}
+                className="mt-4 max-w-lg text-sm text-slate-400"
+              >
+                {heroSubtitle}
+              </motion.p>
+              <p className="mt-3 max-w-lg text-sm text-slate-500">
+                Paste a product URL to stream real-time analysis updates, risk snapshots, and a
+                final verdict — no hidden automation.
               </p>
             </motion.div>
 
@@ -635,7 +708,47 @@ export default function HomePage() {
                   </div>
                 </div>
                 <div className="mt-4 space-y-3 text-xs text-slate-200">
-                <AnimatePresence initial={false}>
+                  {(loading || running) && trueCartSteps.length ? (
+                    <motion.div
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 6 }}
+                      transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.3, ease: easeOut }}
+                      className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3 text-sm text-slate-200"
+                    >
+                      <div className="space-y-2">
+                        {trueCartSteps.map((step, stepIndex) => (
+                          <div key={step} className="flex flex-wrap gap-x-1">
+                            {step.split(" ").map((word, wordIndex) => (
+                              <motion.span
+                                key={`${stepIndex}-${word}-${wordIndex}`}
+                                initial={
+                                  prefersReducedMotion
+                                    ? { opacity: 1, y: 0, scale: 1, skewX: 0 }
+                                    : { opacity: 0, y: 8, scale: 0.92, skewX: -6 }
+                                }
+                                animate={{ opacity: 1, y: 0, scale: 1, skewX: 0 }}
+                                transition={
+                                  prefersReducedMotion
+                                    ? { duration: 0 }
+                                    : {
+                                        delay: stepIndex * 0.22 + wordIndex * 0.04,
+                                        type: "spring",
+                                        stiffness: 240,
+                                        damping: 18,
+                                      }
+                                }
+                                className="inline-block"
+                              >
+                                {word}
+                              </motion.span>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  ) : null}
+                  <AnimatePresence initial={false}>
                     {activities.length ? (
                       activities.map((item, index) => (
                         <motion.div
@@ -701,10 +814,44 @@ export default function HomePage() {
                 prefersReducedMotion ? { duration: 0 } : { duration: 0.25, ease: easeOut }
               }
               className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_12px_50px_rgba(0,0,0,0.35)] backdrop-blur"
+              whileHover={prefersReducedMotion ? undefined : { y: -2 }}
             >
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                Live product snapshot
-              </p>
+              <div className="flex items-center justify-between gap-3">
+                <motion.p
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={{ once: true, amount: 0.6 }}
+                  className="text-xs uppercase tracking-[0.3em] text-slate-400"
+                >
+                  {"Live product snapshot".split(" ").map((word, index) => (
+                    <motion.span
+                      key={`${word}-${index}`}
+                      custom={index}
+                      variants={titleWordVariants}
+                      className="mr-2 inline-block"
+                    >
+                      {word}
+                    </motion.span>
+                  ))}
+                </motion.p>
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleCopy(
+                      [
+                        productInfo.title ?? result?.details?.name ?? "",
+                        productInfo.price ?? result?.details?.price ?? "",
+                        productInfo.description ?? result?.details?.description ?? "",
+                      ]
+                        .filter(Boolean)
+                        .join(" — ")
+                    )
+                  }
+                  className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-200 transition hover:bg-white/10"
+                >
+                  Copy
+                </button>
+              </div>
               {productInfo.status === "blocked" ? (
                 <p className="mt-3 text-sm text-amber-200">
                   Product page blocks automated access. Showing policy-only analysis.
@@ -751,10 +898,25 @@ export default function HomePage() {
                 prefersReducedMotion ? { duration: 0 } : { duration: 0.25, ease: easeOut }
               }
               className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_12px_50px_rgba(0,0,0,0.35)] backdrop-blur"
+              whileHover={prefersReducedMotion ? undefined : { y: -2 }}
             >
-              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
-                Live document checks
-              </p>
+              <motion.p
+                initial="hidden"
+                whileInView="visible"
+                viewport={{ once: true, amount: 0.6 }}
+                className="text-xs uppercase tracking-[0.3em] text-slate-400"
+              >
+                {"Live document checks".split(" ").map((word, index) => (
+                  <motion.span
+                    key={`${word}-${index}`}
+                    custom={index}
+                    variants={titleWordVariants}
+                    className="mr-2 inline-block"
+                  >
+                    {word}
+                  </motion.span>
+                ))}
+              </motion.p>
               <div className="mt-4 space-y-2 text-sm text-slate-300">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500">Eligibility rules</span>
@@ -778,6 +940,7 @@ export default function HomePage() {
                 prefersReducedMotion ? { duration: 0 } : { duration: 0.25, ease: easeOut }
               }
               className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_12px_50px_rgba(0,0,0,0.35)] backdrop-blur"
+              whileHover={prefersReducedMotion ? undefined : { y: -2 }}
             >
               <AnimatePresence mode="wait">
                 {loading ? (
@@ -846,9 +1009,46 @@ export default function HomePage() {
                         layout
                         className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left backdrop-blur"
                       >
-                        <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
-                          Details
-                        </p>
+                        <div className="flex items-center justify-between gap-3">
+                          <motion.p
+                            initial="hidden"
+                            whileInView="visible"
+                            viewport={{ once: true, amount: 0.6 }}
+                            className="text-xs uppercase tracking-[0.3em] text-slate-500"
+                          >
+                            {"Details".split(" ").map((word, index) => (
+                              <motion.span
+                                key={`${word}-${index}`}
+                                custom={index}
+                                variants={titleWordVariants}
+                                className="mr-2 inline-block"
+                              >
+                                {word}
+                              </motion.span>
+                            ))}
+                          </motion.p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              handleCopy(
+                                [
+                                  result.insight?.message ?? "",
+                                  result.insight?.summary ?? "",
+                                  `Flags: ${
+                                    result.details?.flags.length
+                                      ? result.details.flags.join(", ")
+                                      : "none"
+                                  }`,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" — ")
+                              )
+                            }
+                            className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-slate-200 transition hover:bg-white/10"
+                          >
+                            Copy
+                          </button>
+                        </div>
                         <div className="mt-4">
                           <p className="text-sm font-semibold text-slate-300">
                             Flags
