@@ -4,7 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { RuleFlag } from "@/lib/rules";
-import ActivityFeed from "@/components/ActivityFeed";
+import { extractProductInfoFromHTML } from "@/lib/client/extractProductInfo";
 
 type AnalyzeResponse = {
   verdict: "good" | "caution" | "risk" | "unclear";
@@ -46,7 +46,12 @@ type Toast = {
   message: string;
 };
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+type ProductInfo = {
+  status: "idle" | "ready" | "blocked" | "error";
+  title: string | null;
+  price: string | null;
+  description: string | null;
+};
 
 export default function HomePage() {
   const [url, setUrl] = useState("");
@@ -57,6 +62,13 @@ export default function HomePage() {
   const [elapsedMs, setElapsedMs] = useState(0);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [running, setRunning] = useState(false);
+  const [activity, setActivity] = useState<string[]>([]);
+  const [productInfo, setProductInfo] = useState<ProductInfo>({
+    status: "idle",
+    title: null,
+    price: null,
+    description: null,
+  });
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [cardExpanded, setCardExpanded] = useState(false);
   const [buttonHover, setButtonHover] = useState(false);
@@ -85,12 +97,23 @@ export default function HomePage() {
     }, 2600);
   };
 
+  function pushActivity(msg: string) {
+    setActivity((prev) => [...prev, msg]);
+  }
+
   const onSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     setLoading(true);
     setResult(null);
     setLogs([]);
     setRunning(true);
+    setActivity([]);
+    setProductInfo({
+      status: "idle",
+      title: null,
+      price: null,
+      description: null,
+    });
     setCardExpanded(true);
     pushToast("🚀 Analysis started");
 
@@ -105,39 +128,59 @@ export default function HomePage() {
     };
 
     try {
-      pushLogSafe("🌐 Opening website…");
-      await delay(360);
-      pushLogSafe("🔍 Searching for public claims…");
-      await delay(420);
-      pushLogSafe("📄 Reading important pages…");
-      await delay(380);
-      pushLogSafe("📤 Sending website data for verification…");
+      pushActivity("Validating URL… 🔍");
+      try {
+        new URL(url);
+      } catch {
+        pushActivity("Analysis failed – see error details ❌");
+        throw new Error("Invalid URL");
+      }
 
-      const waitLogs = async () => {
-        await delay(420);
-        pushLogSafe("🧠 Analyzing trust signals…");
-        await delay(520);
-        pushLogSafe("🔗 Matching claims with evidence…");
-      };
+      pushActivity("Contacting Mino agent… 🤖");
+      pushActivity("Fetching application page content… 🌐");
+      const pageRes = await fetch("/api/fetch-page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url }),
+      });
+      if (pageRes.ok) {
+        const pageData = (await pageRes.json()) as {
+          blocked: boolean;
+          html?: string;
+        };
+        if (pageData.blocked || !pageData.html) {
+          setProductInfo((prev) => ({ ...prev, status: "blocked" }));
+        } else {
+          const extracted = extractProductInfoFromHTML(pageData.html, url);
+          setProductInfo({
+            status: "ready",
+            title: extracted.title,
+            price: extracted.price,
+            description: extracted.description,
+          });
+        }
+      } else {
+        setProductInfo((prev) => ({ ...prev, status: "error" }));
+      }
 
-      const responsePromise = fetch("/api/analyze", {
+      const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url }),
       });
 
-      waitLogs();
-
-      const res = await responsePromise;
       const data = (await res.json()) as AnalyzeResponse;
+      pushActivity("Extracting eligibility rules… 📄");
+      pushActivity("Extracting document text… 🧾");
+      pushActivity("Running document quality checks… 🧪");
+      pushActivity("Running rejection analysis engine… ⚙️");
+      pushActivity("Preparing structured results… 📊");
       if (!res.ok) {
         throw new Error("Request failed.");
       }
       setResult(data);
       pushLogSafe("⚖️ Computing trust verdict…", "success");
-      await delay(360);
       pushLogSafe("📊 Preparing report…", "success");
-      await delay(320);
       pushLogSafe("✅ Trust report ready.", "success");
       pushToast("🎉 Trust report generated");
     } catch {
@@ -146,6 +189,7 @@ export default function HomePage() {
         flags: fallbackFlags,
         explanations: [],
       });
+      pushActivity("Analysis failed – see error details ❌");
       pushLogSafe("⚠️ Unable to complete analysis.", "warn");
     } finally {
       setLoading(false);
@@ -305,12 +349,7 @@ export default function HomePage() {
   };
 
   return (
-    <motion.main
-      initial={{ opacity: 0, y: 40 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={prefersReducedMotion ? { duration: 0 } : { duration: 0.6, ease: "easeOut" }}
-      className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center justify-center px-4 py-16"
-    >
+    <main className="relative mx-auto flex min-h-screen w-full max-w-5xl flex-col items-center justify-center px-4 py-16">
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
         <motion.div
           className="absolute left-1/2 top-[-10%] h-64 w-64 -translate-x-1/2 rounded-full bg-sky-400/20 blur-[120px]"
@@ -375,9 +414,11 @@ export default function HomePage() {
         <div className="absolute inset-0 bg-gradient-to-br from-white/5 via-transparent to-white/5" />
         <div className="relative">
           <motion.div
-            initial={{ opacity: 0, y: -12 }}
+            initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: easeOut }}
+            transition={
+              prefersReducedMotion ? { duration: 0 } : { duration: 0.25, ease: easeOut }
+            }
             className="text-center"
           >
             <p className="text-xs uppercase tracking-[0.3em] text-slate-400">
@@ -511,11 +552,59 @@ export default function HomePage() {
           </motion.form>
 
           <div className="mt-6">
-            <ActivityFeed logs={logs} running={running} />
+            <div className="rounded-2xl border border-white/10 bg-gradient-to-br from-white/10 via-white/5 to-transparent p-4 shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur">
+              <div className="flex items-center justify-between">
+                <p className="text-xs uppercase tracking-[0.3em] text-slate-300">
+                  Agent activity
+                </p>
+                <span className="text-xs text-slate-500">
+                  {running ? "Live" : "Idle"}
+                </span>
+              </div>
+              <div className="mt-3 space-y-2 text-xs text-slate-200">
+                <AnimatePresence initial={false}>
+                  {activity.length ? (
+                    activity.map((item, index) => (
+                      <motion.div
+                        key={`${item}-${index}`}
+                        initial={{ opacity: 0, x: -8 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        exit={{ opacity: 0, x: -8 }}
+                        transition={
+                          prefersReducedMotion
+                            ? { duration: 0 }
+                            : { duration: 0.25, delay: index * 0.05 }
+                        }
+                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-mono"
+                      >
+                        {item}
+                      </motion.div>
+                    ))
+                  ) : (
+                    <motion.div
+                      key="empty-activity"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      className="text-slate-500"
+                    >
+                      No activity yet. Paste a URL to begin.
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
           </div>
 
           <section className="mt-6">
-            <div className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_12px_50px_rgba(0,0,0,0.35)] backdrop-blur">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.98 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={
+                prefersReducedMotion ? { duration: 0 } : { duration: 0.25, ease: easeOut }
+              }
+              className="rounded-3xl border border-white/10 bg-white/5 p-6 shadow-[0_12px_50px_rgba(0,0,0,0.35)] backdrop-blur"
+            >
               <AnimatePresence mode="wait">
                 {loading ? (
                   <motion.div
@@ -545,6 +634,7 @@ export default function HomePage() {
                   </motion.div>
                 ) : result ? (
                   <motion.div
+                    layout
                     key={result.verdict}
                     initial={{ opacity: 0, x: 20, clipPath: "inset(0 100% 0 0)" }}
                     animate={{ opacity: 1, x: 0, clipPath: "inset(0 0% 0 0)" }}
@@ -553,6 +643,7 @@ export default function HomePage() {
                     className="flex flex-col items-center justify-center gap-5 text-center"
                   >
                     <motion.div
+                      layout
                       {...verdictMotion}
                       className={`relative flex flex-col items-center justify-center gap-3 rounded-3xl border border-white/10 bg-black/30 px-10 py-8 shadow-2xl backdrop-blur ${verdictConfig.glow}`}
                     >
@@ -577,21 +668,30 @@ export default function HomePage() {
                       ) : null}
                     </motion.div>
                     {result.details ? (
-                      <div className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left backdrop-blur">
+                      <motion.div
+                        layout
+                        className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-left backdrop-blur"
+                      >
                         <p className="text-xs uppercase tracking-[0.3em] text-slate-500">
                           Product details
                         </p>
+                        {productInfo.status === "blocked" ? (
+                          <p className="mt-3 text-sm text-amber-200">
+                            Product page blocks automated access. Showing
+                            policy-only analysis.
+                          </p>
+                        ) : null}
                         <div className="mt-3 space-y-2 text-sm text-slate-200">
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="text-slate-400">Name</span>
                             <span className="text-right text-white">
-                              {result.details.name}
+                              {productInfo.title ?? result.details.name}
                             </span>
                           </div>
                           <div className="flex flex-wrap items-center justify-between gap-2">
                             <span className="text-slate-400">Price</span>
                             <span className="text-right text-white">
-                              {result.details.price ?? "Not found"}
+                              {productInfo.price ?? result.details.price ?? "Not found"}
                             </span>
                           </div>
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -608,7 +708,7 @@ export default function HomePage() {
                             Description
                           </p>
                           <p className="mt-2 text-sm text-slate-300">
-                            {result.details.description}
+                            {productInfo.description ?? result.details.description}
                           </p>
                         </div>
                         <div className="mt-4">
@@ -639,7 +739,7 @@ export default function HomePage() {
                             )}
                           </ul>
                         </div>
-                      </div>
+                      </motion.div>
                     ) : null}
                   </motion.div>
                 ) : (
@@ -659,7 +759,7 @@ export default function HomePage() {
                   </motion.div>
                 )}
               </AnimatePresence>
-            </div>
+            </motion.div>
           </section>
         </div>
       </motion.div>
@@ -679,6 +779,6 @@ export default function HomePage() {
           ))}
         </AnimatePresence>
       </div>
-    </motion.main>
+    </main>
   );
 }
