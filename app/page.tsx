@@ -414,9 +414,9 @@ export default function HomePage() {
     };
   }, [easeInOut, easeOut, prefersReducedMotion, result?.verdict]);
 
-  const heroTitle = "TrueCart";
+  const heroTitle = "TRUECART";
   const heroTitleLetters = useMemo(() => heroTitle.split(""), [heroTitle]);
-  const heroSubtitle = "Instant trust signal for any product link.";
+  const heroSubtitle = "Product trust analysis for shopping links.";
   const trueCartSteps = useMemo(
     () => [
       "Analyzing product details…",
@@ -500,8 +500,8 @@ export default function HomePage() {
 
       <div className="relative mx-auto w-full max-w-6xl">
         <div className="flex flex-wrap items-center justify-between gap-4 text-[10px] uppercase tracking-[0.45em] text-slate-500">
-          <span>TrueCart</span>
-          <span>Application Rejection Analyzer</span>
+          <span>TRUECART</span>
+          <span>Product trust analysis</span>
         </div>
 
         <motion.div
@@ -519,7 +519,7 @@ export default function HomePage() {
               }
             >
               <p className="text-xs uppercase tracking-[0.4em] text-slate-500">
-                Trust signal engine
+                Shopping trust analysis
               </p>
               <h1 className="mt-4 text-4xl font-semibold uppercase leading-tight tracking-[0.08em] text-white sm:text-5xl lg:text-6xl">
                 <span
@@ -567,8 +567,8 @@ export default function HomePage() {
                 {heroSubtitle}
               </motion.p>
               <p className="mt-3 max-w-lg text-sm text-slate-500">
-                Paste a product URL to stream real-time analysis updates, risk snapshots, and a
-                final verdict — no hidden automation.
+                Paste a shopping link to stream real-time analysis updates, risk snapshots, and a
+                final verdict.
               </p>
             </motion.div>
 
