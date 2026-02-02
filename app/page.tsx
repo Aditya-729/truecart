@@ -750,34 +750,41 @@ export default function HomePage() {
                   ) : null}
                   <AnimatePresence initial={false}>
                     {activities.length ? (
-                      activities.map((item, index) => (
-                        <motion.div
-                          key={item.id}
-                          initial={{ opacity: 0, y: 8 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          exit={{ opacity: 0, y: 8 }}
-                          transition={
-                            prefersReducedMotion
-                              ? { duration: 0 }
-                              : { duration: 0.25, delay: index * 0.02 }
-                          }
-                          className={`rounded-xl border border-white/10 bg-white/5 px-3 py-2 ${
-                            item.id === activeActivityId ? "shadow-[0_0_20px_rgba(59,130,246,0.2)]" : ""
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="mt-1 h-2 w-2 rounded-full bg-slate-400/70" />
-                            <div className="flex-1">
-                              <p className="text-sm text-slate-200">
-                                {item.message}
-                              </p>
-                              <p className="text-[11px] text-slate-500">
-                                {new Date(item.time).toLocaleTimeString()}
-                              </p>
+                      [...activities].reverse().map((item, index) => {
+                        const isCompact = index >= 6;
+                        return (
+                          <motion.div
+                            key={item.id}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: 8 }}
+                            transition={
+                              prefersReducedMotion
+                                ? { duration: 0 }
+                                : { duration: 0.25, delay: index * 0.02 }
+                            }
+                            className={`rounded-xl border border-white/10 bg-white/5 ${
+                              isCompact ? "px-3 py-1.5 opacity-70" : "px-3 py-2"
+                            } ${
+                              item.id === activeActivityId ? "shadow-[0_0_20px_rgba(59,130,246,0.2)]" : ""
+                            }`}
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className={`mt-1 h-2 w-2 rounded-full bg-slate-400/70 ${
+                                isCompact ? "opacity-70" : ""
+                              }`} />
+                              <div className="flex-1">
+                                <p className={isCompact ? "text-[12px] text-slate-300" : "text-sm text-slate-200"}>
+                                  {item.message}
+                                </p>
+                                <p className="text-[11px] text-slate-500">
+                                  {new Date(item.time).toLocaleTimeString()}
+                                </p>
+                              </div>
                             </div>
-                          </div>
-                        </motion.div>
-                      ))
+                          </motion.div>
+                        );
+                      })
                     ) : (
                       <motion.div
                         key="empty-activity"
