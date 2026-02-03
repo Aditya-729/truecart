@@ -734,7 +734,7 @@ export default function HomePage() {
                     />
                   </div>
                 </div>
-                <div className="mt-4 space-y-3 text-xs text-slate-200">
+                <div className="mt-4 max-h-[420px] space-y-3 overflow-y-auto pr-1 text-xs text-slate-200">
                   {(loading || running) && trueCartSteps.length ? (
                     <motion.div
                       initial={{ opacity: 0, y: 6 }}
