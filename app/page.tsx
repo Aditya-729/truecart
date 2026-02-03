@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 
 import type { RuleFlag } from "@/lib/rules";
@@ -78,6 +78,8 @@ export default function HomePage() {
   const [cardExpanded, setCardExpanded] = useState(false);
   const [buttonHover, setButtonHover] = useState(false);
   const [glitchOffset, setGlitchOffset] = useState({ x: 0, y: 0 });
+  const [expandedCompactIds, setExpandedCompactIds] = useState<Set<string>>(new Set());
+  const [showEarlierSteps, setShowEarlierSteps] = useState(true);
   const sourceRef = useRef<EventSource | null>(null);
   const streamActiveRef = useRef(false);
   const lastActivityRef = useRef(Date.now());
@@ -87,7 +89,7 @@ export default function HomePage() {
   const easeInOut = [0.4, 0, 0.2, 1] as const;
   const progressCount = activities.filter((item) => item.kind !== "heartbeat").length;
   const progress = result ? 1 : Math.min(progressCount / totalSteps, 1);
-  const activeActivityId = running ? activities[activities.length - 1]?.id : null;
+  const activeActivityId = running ? activities[0]?.id : null;
 
   const fallbackFlags: RuleFlag[] = ["analysis_failed"];
 
@@ -183,13 +185,13 @@ export default function HomePage() {
         const data = JSON.parse((event as MessageEvent).data) as { message: string };
         const isHeartbeat = data.message.startsWith("Still working on:");
         setActivities((prev) => [
-          ...prev,
           {
             id: Math.random().toString(36).slice(2),
             message: data.message,
             time: new Date().toISOString(),
             kind: isHeartbeat ? "heartbeat" : "normal",
           },
+          ...prev,
         ]);
         lastActivityRef.current = Date.now();
         setShowIdleHint(false);
@@ -227,13 +229,13 @@ export default function HomePage() {
         streamActiveRef.current = false;
         setShowIdleHint(false);
         setActivities((prev) => [
-          ...prev,
           {
             id: Math.random().toString(36).slice(2),
             message: "Analysis failed – see error details",
             time: new Date().toISOString(),
             kind: "normal",
           },
+          ...prev,
         ]);
       };
     } catch {
@@ -246,13 +248,13 @@ export default function HomePage() {
         explanations: [],
       });
       setActivities((prev) => [
-        ...prev,
         {
           id: Math.random().toString(36).slice(2),
           message: "Analysis failed – see error details",
           time: new Date().toISOString(),
           kind: "normal",
         },
+        ...prev,
       ]);
       setRunning(false);
     } finally {
@@ -453,6 +455,31 @@ export default function HomePage() {
       y: Math.random() * 6 - 3,
     });
   }, [prefersReducedMotion]);
+
+  const recentActivities = useMemo(() => activities.slice(0, 4), [activities]);
+  const olderActivities = useMemo(() => activities.slice(4), [activities]);
+
+  const getActivityStatus = useCallback(
+    (item: ActivityEvent) => {
+      if (item.id === activeActivityId && running) return "running";
+      const lower = item.message.toLowerCase();
+      if (lower.includes("failed") || lower.includes("error")) return "error";
+      return "done";
+    },
+    [activeActivityId, running]
+  );
+
+  const toggleCompact = useCallback((id: string) => {
+    setExpandedCompactIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  }, []);
 
   return (
     <main className="relative min-h-screen w-full bg-[#0b0b0c] px-6 py-12 text-slate-100">
@@ -750,41 +777,117 @@ export default function HomePage() {
                   ) : null}
                   <AnimatePresence initial={false}>
                     {activities.length ? (
-                      [...activities].reverse().map((item, index) => {
-                        const isCompact = index >= 6;
-                        return (
-                          <motion.div
-                            key={item.id}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: 8 }}
-                            transition={
-                              prefersReducedMotion
-                                ? { duration: 0 }
-                                : { duration: 0.25, delay: index * 0.02 }
-                            }
-                            className={`rounded-xl border border-white/10 bg-white/5 ${
-                              isCompact ? "px-3 py-1.5 opacity-70" : "px-3 py-2"
-                            } ${
-                              item.id === activeActivityId ? "shadow-[0_0_20px_rgba(59,130,246,0.2)]" : ""
-                            }`}
-                          >
-                            <div className="flex items-start gap-3">
-                              <div className={`mt-1 h-2 w-2 rounded-full bg-slate-400/70 ${
-                                isCompact ? "opacity-70" : ""
-                              }`} />
-                              <div className="flex-1">
-                                <p className={isCompact ? "text-[12px] text-slate-300" : "text-sm text-slate-200"}>
-                                  {item.message}
-                                </p>
-                                <p className="text-[11px] text-slate-500">
-                                  {new Date(item.time).toLocaleTimeString()}
-                                </p>
+                      <>
+                        {recentActivities.map((item, index) => {
+                          const status = getActivityStatus(item);
+                          return (
+                            <motion.div
+                              key={item.id}
+                              initial={{ opacity: 0, y: 8 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, y: 8 }}
+                              transition={
+                                prefersReducedMotion
+                                  ? { duration: 0 }
+                                  : { duration: 0.25, delay: index * 0.02 }
+                              }
+                              className={`rounded-xl border border-white/10 bg-white/5 px-3 py-2 ${
+                                item.id === activeActivityId ? "shadow-[0_0_20px_rgba(59,130,246,0.2)]" : ""
+                              }`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <div
+                                  className={`mt-1 h-2 w-2 rounded-full ${
+                                    status === "running"
+                                      ? "bg-sky-300/80 animate-pulse"
+                                      : status === "error"
+                                        ? "bg-rose-400/80"
+                                        : "bg-emerald-300/80"
+                                  }`}
+                                />
+                                <div className="flex-1">
+                                  <p className="text-sm text-slate-200">{item.message}</p>
+                                  <p className="text-[11px] text-slate-500">
+                                    {new Date(item.time).toLocaleTimeString()}
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                          </motion.div>
-                        );
-                      })
+                            </motion.div>
+                          );
+                        })}
+                        {olderActivities.length ? (
+                          <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2">
+                            <button
+                              type="button"
+                              onClick={() => setShowEarlierSteps((prev) => !prev)}
+                              className="flex w-full items-center justify-between text-xs uppercase tracking-[0.3em] text-slate-400"
+                            >
+                              <span>Earlier steps</span>
+                              <span className="text-[10px] text-slate-500">
+                                {showEarlierSteps ? "Hide" : "Show"} · {olderActivities.length}
+                              </span>
+                            </button>
+                            <AnimatePresence initial={false}>
+                              {showEarlierSteps ? (
+                                <motion.div
+                                  key="earlier-steps"
+                                  initial={{ opacity: 0, height: 0 }}
+                                  animate={{ opacity: 1, height: "auto" }}
+                                  exit={{ opacity: 0, height: 0 }}
+                                  transition={
+                                    prefersReducedMotion ? { duration: 0 } : { duration: 0.25 }
+                                  }
+                                  className="mt-3 space-y-2 overflow-hidden"
+                                >
+                                  {olderActivities.map((item, index) => {
+                                    const status = getActivityStatus(item);
+                                    const isExpanded = expandedCompactIds.has(item.id);
+                                    return (
+                                      <div key={item.id} className="rounded-xl border border-white/10 bg-white/5">
+                                        <button
+                                          type="button"
+                                          onClick={() => toggleCompact(item.id)}
+                                          className="flex w-full items-center justify-between px-3 py-2 text-left text-[12px] text-slate-300"
+                                        >
+                                          <span className="line-clamp-1">{item.message}</span>
+                                          <span className="ml-3 inline-flex items-center gap-2 text-[11px] text-slate-500">
+                                            <span
+                                              className={`h-2 w-2 rounded-full ${
+                                                status === "running"
+                                                  ? "bg-sky-300/80 animate-pulse"
+                                                  : status === "error"
+                                                    ? "bg-rose-400/80"
+                                                    : "bg-emerald-300/80"
+                                              }`}
+                                            />
+                                            {status}
+                                          </span>
+                                        </button>
+                                        <AnimatePresence initial={false}>
+                                          {isExpanded ? (
+                                            <motion.div
+                                              key="details"
+                                              initial={{ opacity: 0, height: 0 }}
+                                              animate={{ opacity: 1, height: "auto" }}
+                                              exit={{ opacity: 0, height: 0 }}
+                                              transition={
+                                                prefersReducedMotion ? { duration: 0 } : { duration: 0.2 }
+                                              }
+                                              className="px-3 pb-2 text-[11px] text-slate-500"
+                                            >
+                                              {new Date(item.time).toLocaleTimeString()}
+                                            </motion.div>
+                                          ) : null}
+                                        </AnimatePresence>
+                                      </div>
+                                    );
+                                  })}
+                                </motion.div>
+                              ) : null}
+                            </AnimatePresence>
+                          </div>
+                        ) : null}
+                      </>
                     ) : (
                       <motion.div
                         key="empty-activity"
